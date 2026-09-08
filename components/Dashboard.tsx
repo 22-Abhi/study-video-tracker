@@ -40,7 +40,7 @@ export default function Dashboard({
 
   async function loadVideos() {
     try {
-      const res = await fetch("/api/videos");
+      const res = await fetch("/api/videos", { cache: "no-store" });
       const data = await res.json();
       if (res.ok) {
         setVideos(data);
@@ -101,8 +101,9 @@ export default function Dashboard({
       if (!res.ok) {
         setError(data.error || "Failed to add video.");
       } else {
+        // Instantly prepend new video to list
+        setVideos((prev) => [data, ...prev]);
         setForm({ title: "", url: "", tags: "", category: "" });
-        await loadVideos();
       }
     } catch {
       setError("Failed to add video. Please try again.");
@@ -115,37 +116,37 @@ export default function Dashboard({
     if (currentMode !== "uploader") return;
     if (!confirm("Are you sure you want to delete this video?")) return;
 
+    // Optimistically remove from UI immediately
+    setVideos((prev) => prev.filter((v) => v.id !== id));
+    if (activeModalVideo?.id === id) {
+      setActiveModalVideo(null);
+    }
+
     try {
       const res = await fetch(`/api/videos/${id}`, { method: "DELETE" });
-      if (res.ok) {
-        setVideos((prev) => prev.filter((v) => v.id !== id));
-        if (activeModalVideo?.id === id) {
-          setActiveModalVideo(null);
-        }
-      } else {
+      if (!res.ok) {
         const data = await res.json();
         setError(data.error || "Could not delete video.");
+        await loadVideos();
       }
     } catch {
-      setError("Network error deleting video.");
+      await loadVideos();
     }
   }
 
   async function toggleWatched(video: Video) {
     const nextWatched = !video.watched;
+    // Optimistic instant toggle
     setVideos((prev) =>
       prev.map((v) => (v.id === video.id ? { ...v, watched: nextWatched } : v))
     );
 
     try {
-      const res = await fetch("/api/watched", {
+      await fetch("/api/watched", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ videoId: video.id, watched: nextWatched })
       });
-      if (!res.ok) {
-        await loadVideos();
-      }
     } catch {
       await loadVideos();
     }
@@ -311,6 +312,10 @@ export default function Dashboard({
                   className="thumb"
                   src={`https://img.youtube.com/vi/${video.youtube_id}/mqdefault.jpg`}
                   alt={video.title}
+                  loading="lazy"
+                  decoding="async"
+                  width="320"
+                  height="180"
                 />
                 <div className="play-overlay">
                   <div className="play-icon">▶</div>

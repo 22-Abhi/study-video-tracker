@@ -17,38 +17,34 @@ export async function GET() {
   let dbVideos: VideoRecord[] = [];
   let dbWatched: number[] = [];
 
-  // 1. Fetch from Supabase if available
+  // Run database queries in parallel for maximum speed
   try {
-    const { data: videos, error } = await supabase
-      .from("videos")
-      .select("id, title, youtube_id, tags, category, added_by")
-      .order("id", { ascending: false });
+    const [videosRes, watchedRes] = await Promise.allSettled([
+      supabase
+        .from("videos")
+        .select("id, title, youtube_id, tags, category, added_by")
+        .order("id", { ascending: false }),
+      supabase
+        .from("watched")
+        .select("video_id")
+        .eq("user_id", userId)
+    ]);
 
-    if (!error && videos && videos.length > 0) {
-      dbVideos = videos;
+    if (videosRes.status === "fulfilled" && !videosRes.value.error && videosRes.value.data) {
+      dbVideos = videosRes.value.data;
+    }
+
+    if (watchedRes.status === "fulfilled" && !watchedRes.value.error && watchedRes.value.data) {
+      dbWatched = watchedRes.value.data.map((x: any) => Number(x.video_id));
     }
   } catch {}
 
-  try {
-    const { data: watchedRecords, error } = await supabase
-      .from("watched")
-      .select("video_id")
-      .eq("user_id", userId);
-
-    if (!error && watchedRecords) {
-      dbWatched = watchedRecords.map((x) => Number(x.video_id));
-    }
-  } catch {}
-
-  // 2. Fetch from persistent disk storage
+  // Merge with disk store
   const diskVideos = persistentStore.getVideos();
   const existingYoutubeIds = new Set(dbVideos.map((v) => v.youtube_id));
-  
-  // Combine DB videos and disk videos without duplicates
   const additionalDiskVideos = diskVideos.filter((v) => !existingYoutubeIds.has(v.youtube_id));
   const combinedVideos = [...dbVideos, ...additionalDiskVideos];
 
-  // Combine watched status
   const diskWatched = persistentStore.getWatchedSet(userId);
   const combinedWatched = new Set([...dbWatched, ...Array.from(diskWatched)]);
 
@@ -57,7 +53,11 @@ export async function GET() {
     watched: combinedWatched.has(Number(v.id))
   }));
 
-  return NextResponse.json(result);
+  return NextResponse.json(result, {
+    headers: {
+      "Cache-Control": "private, no-cache, no-store, must-revalidate"
+    }
+  });
 }
 
 export async function POST(req: Request) {
@@ -96,7 +96,7 @@ export async function POST(req: Request) {
     tags = body.tags.map((t: any) => String(t).trim()).filter(Boolean);
   }
 
-  // Save permanently to disk storage immediately
+  // Save to persistent storage immediately
   const savedRecord = persistentStore.addVideo({
     title,
     youtube_id: yId,
@@ -105,16 +105,18 @@ export async function POST(req: Request) {
     added_by: userId
   });
 
-  // Also sync to Supabase in the background
-  try {
-    await supabase.from("videos").insert({
-      title,
-      youtube_id: yId,
-      tags,
-      category,
-      added_by: userId
-    });
-  } catch {}
+  // Sync to Supabase in the background non-blocking
+  (async () => {
+    try {
+      await supabase.from("videos").insert({
+        title,
+        youtube_id: yId,
+        tags,
+        category,
+        added_by: userId
+      });
+    } catch {}
+  })();
 
   return NextResponse.json(savedRecord, { status: 201 });
 }
