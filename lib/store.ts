@@ -68,20 +68,10 @@ export const persistentStore = {
     return record;
   },
 
-  deleteVideo: (id: number, userIdentifier: string): boolean => {
+  deleteVideo: (id: number): boolean => {
     ensureFiles();
     const videos = persistentStore.getVideos();
-    const normalizedUser = userIdentifier.toLowerCase();
-    
-    // Only allow deletion if user added it or is the authorized owner
-    const target = videos.find((v) => v.id === id);
-    if (!target) return false;
-
-    const isOwner = target.added_by.toLowerCase() === normalizedUser || 
-                    normalizedUser === "abhi.ukande22@gmail.com";
-    if (!isOwner) return false;
-
-    const updated = videos.filter((v) => v.id !== id);
+    const updated = videos.filter((v) => Number(v.id) !== Number(id));
     try {
       fs.writeFileSync(videosFile, JSON.stringify(updated, null, 2), "utf8");
       return true;

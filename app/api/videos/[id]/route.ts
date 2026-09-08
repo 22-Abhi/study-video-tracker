@@ -28,7 +28,7 @@ export async function DELETE(
   }
 
   // Delete from persistent disk store
-  persistentStore.deleteVideo(videoId, userId);
+  persistentStore.deleteVideo(videoId);
 
   // Also delete from Supabase if present
   try {
