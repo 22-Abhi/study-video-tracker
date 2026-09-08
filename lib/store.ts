@@ -4,6 +4,7 @@ import path from "path";
 export interface VideoRecord {
   id: number;
   title: string;
+  subtitle?: string | null;
   youtube_id: string;
   tags: string[];
   category: string | null;

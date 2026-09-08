@@ -297,6 +297,26 @@ a {
   color: var(--text-main);
 }
 
+.clickable-title {
+  cursor: pointer;
+  transition: color 0.15s ease;
+}
+
+.clickable-title:hover {
+  color: var(--primary);
+  text-decoration: underline;
+}
+
+.clickable-subtitle {
+  cursor: pointer;
+  transition: color 0.15s ease;
+}
+
+.clickable-subtitle:hover {
+  color: var(--text-main);
+  text-decoration: underline;
+}
+
 .category-text {
   font-size: 0.8125rem;
   color: var(--text-muted);

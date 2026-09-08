@@ -7,6 +7,7 @@ import ThemeToggle from "./ThemeToggle";
 type Video = {
   id: number;
   title: string;
+  subtitle?: string | null;
   youtube_id: string;
   tags: string[];
   category: string | null;
@@ -35,7 +36,7 @@ export default function Dashboard({
   const [selectedTag, setSelectedTag] = useState("");
   const [activeModalVideo, setActiveModalVideo] = useState<Video | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [form, setForm] = useState({ title: "", url: "", tags: "", category: "" });
+  const [form, setForm] = useState({ title: "", subtitle: "", url: "", tags: "", category: "" });
   const [error, setError] = useState("");
 
   async function loadVideos() {
@@ -78,8 +79,9 @@ export default function Dashboard({
     return videos.filter((v) => {
       const q = query.toLowerCase().trim();
       const titleMatch = v.title.toLowerCase().includes(q);
+      const subtitleMatch = (v.subtitle || "").toLowerCase().includes(q);
       const tagMatch = (v.tags || []).some((t) => t.toLowerCase().includes(q));
-      const matchesSearch = !q || titleMatch || tagMatch;
+      const matchesSearch = !q || titleMatch || subtitleMatch || tagMatch;
       const matchesTag = !selectedTag || (v.tags || []).includes(selectedTag);
       return matchesSearch && matchesTag;
     });
@@ -103,7 +105,7 @@ export default function Dashboard({
       } else {
         // Instantly prepend new video to list
         setVideos((prev) => [data, ...prev]);
-        setForm({ title: "", url: "", tags: "", category: "" });
+        setForm({ title: "", subtitle: "", url: "", tags: "", category: "" });
       }
     } catch {
       setError("Failed to add video. Please try again.");
@@ -221,14 +223,20 @@ export default function Dashboard({
           <div className="form-grid">
             <input
               className="input"
-              placeholder="Video Title"
+              placeholder="Video Title (e.g. Introduction to Derivatives)"
               value={form.title}
               onChange={(e) => setForm({ ...form, title: e.target.value })}
               required
             />
             <input
               className="input"
-              placeholder="YouTube Video URL"
+              placeholder="Subtitle / Description (e.g. Calculus Part 1 • Basics & Rules)"
+              value={form.subtitle}
+              onChange={(e) => setForm({ ...form, subtitle: e.target.value })}
+            />
+            <input
+              className="input full-width"
+              placeholder="YouTube Video URL (e.g. https://www.youtube.com/watch?v=...)"
               value={form.url}
               onChange={(e) => setForm({ ...form, url: e.target.value })}
               required
@@ -241,7 +249,7 @@ export default function Dashboard({
             />
             <input
               className="input"
-              placeholder="Category (optional)"
+              placeholder="Category (optional, e.g. Mathematics)"
               value={form.category}
               onChange={(e) => setForm({ ...form, category: e.target.value })}
             />
@@ -262,7 +270,7 @@ export default function Dashboard({
       <div className="toolbar">
         <input
           className="input search-input"
-          placeholder="Search by title or tag..."
+          placeholder="Search by title, subtitle, or tag..."
           value={query}
           onChange={(e) => setQuery(e.target.value)}
         />
@@ -304,9 +312,11 @@ export default function Dashboard({
         ) : (
           filteredVideos.map((video) => (
             <article className="card" key={video.id}>
+              {/* Thumbnail - Click to pop screen video */}
               <div
                 className="thumb-wrapper"
                 onClick={() => setActiveModalVideo(video)}
+                title="Click to play video"
               >
                 <img
                   className="thumb"
@@ -324,11 +334,40 @@ export default function Dashboard({
                   <span className="watched-badge">Watched ✓</span>
                 )}
               </div>
+
               <div className="card-body">
-                <div className="card-title">{video.title}</div>
+                {/* Title - Click to pop screen video */}
+                <div
+                  className="card-title clickable-title"
+                  onClick={() => setActiveModalVideo(video)}
+                  title="Click to play video"
+                  style={{ cursor: "pointer" }}
+                >
+                  {video.title}
+                </div>
+
+                {/* Subtitle - Click to pop screen video */}
+                {video.subtitle && (
+                  <div
+                    className="card-subtitle clickable-subtitle"
+                    onClick={() => setActiveModalVideo(video)}
+                    title="Click to play video"
+                    style={{
+                      cursor: "pointer",
+                      fontSize: "0.875rem",
+                      color: "var(--text-muted)",
+                      marginBottom: "8px",
+                      lineHeight: "1.4"
+                    }}
+                  >
+                    {video.subtitle}
+                  </div>
+                )}
+
                 {video.category && (
                   <div className="category-text">{video.category}</div>
                 )}
+
                 {video.tags && video.tags.length > 0 && (
                   <div className="tags">
                     {video.tags.map((t) => (
@@ -338,12 +377,13 @@ export default function Dashboard({
                     ))}
                   </div>
                 )}
+
                 <div className="card-actions">
                   <button
                     className="btn primary"
                     onClick={() => setActiveModalVideo(video)}
                   >
-                    Watch
+                    ▶ Watch Video
                   </button>
                   <button
                     className="btn"
@@ -367,7 +407,7 @@ export default function Dashboard({
         )}
       </section>
 
-      {/* Video Modal Player */}
+      {/* Video Pop Screen Modal */}
       {activeModalVideo && (
         <div
           className="modal-backdrop"
@@ -375,10 +415,18 @@ export default function Dashboard({
         >
           <div className="modal" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
-              <div className="modal-title">{activeModalVideo.title}</div>
+              <div>
+                <div className="modal-title">{activeModalVideo.title}</div>
+                {activeModalVideo.subtitle && (
+                  <div style={{ fontSize: "0.875rem", color: "var(--text-muted)", marginTop: "3px" }}>
+                    {activeModalVideo.subtitle}
+                  </div>
+                )}
+              </div>
               <button
                 className="btn"
                 onClick={() => setActiveModalVideo(null)}
+                style={{ marginLeft: "12px" }}
               >
                 ✕ Close
               </button>

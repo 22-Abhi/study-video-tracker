@@ -22,7 +22,7 @@ export async function GET() {
     const [videosRes, watchedRes] = await Promise.allSettled([
       supabase
         .from("videos")
-        .select("id, title, youtube_id, tags, category, added_by")
+        .select("id, title, subtitle, youtube_id, tags, category, added_by")
         .order("id", { ascending: false }),
       supabase
         .from("watched")
@@ -76,6 +76,7 @@ export async function POST(req: Request) {
   const body = await req.json();
   const rawUrl = String(body.url || "").trim();
   const title = String(body.title || "").trim();
+  const subtitle = String(body.subtitle || "").trim() || null;
   const category = String(body.category || "").trim() || null;
 
   const yId = youtubeId(rawUrl);
@@ -99,6 +100,7 @@ export async function POST(req: Request) {
   // Save to persistent storage immediately
   const savedRecord = persistentStore.addVideo({
     title,
+    subtitle,
     youtube_id: yId,
     tags,
     category,
@@ -110,6 +112,7 @@ export async function POST(req: Request) {
     try {
       await supabase.from("videos").insert({
         title,
+        subtitle,
         youtube_id: yId,
         tags,
         category,
