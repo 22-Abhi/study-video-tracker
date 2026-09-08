@@ -5,6 +5,8 @@ export interface VideoRecord {
   id: number;
   title: string;
   subtitle?: string | null;
+  topic: string;
+  subtopic: string;
   youtube_id: string;
   tags: string[];
   category: string | null;
@@ -36,7 +38,12 @@ export const persistentStore = {
     ensureFiles();
     try {
       const data = fs.readFileSync(videosFile, "utf8");
-      return JSON.parse(data || "[]");
+      const list = JSON.parse(data || "[]");
+      return list.map((v: any) => ({
+        ...v,
+        topic: v.topic || v.category || "General",
+        subtopic: v.subtopic || "General Lessons"
+      }));
     } catch {
       return [];
     }
@@ -46,7 +53,12 @@ export const persistentStore = {
     ensureFiles();
     const videos = persistentStore.getVideos();
     const nextId = Date.now();
-    const record: VideoRecord = { id: nextId, ...v };
+    const record: VideoRecord = {
+      id: nextId,
+      ...v,
+      topic: v.topic?.trim() || "General",
+      subtopic: v.subtopic?.trim() || "General Lessons"
+    };
     const updated = [record, ...videos];
     try {
       fs.writeFileSync(videosFile, JSON.stringify(updated, null, 2), "utf8");

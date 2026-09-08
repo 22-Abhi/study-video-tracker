@@ -8,6 +8,8 @@ type Video = {
   id: number;
   title: string;
   subtitle?: string | null;
+  topic: string;
+  subtopic: string;
   youtube_id: string;
   tags: string[];
   category: string | null;
@@ -32,11 +34,20 @@ export default function Dashboard({
     isUploaderEligible ? initialRole : "viewer"
   );
   const [videos, setVideos] = useState<Video[]>([]);
+  const [selectedTopic, setSelectedTopic] = useState<string | null>(null);
+  const [selectedSubtopic, setSelectedSubtopic] = useState<string>("");
   const [query, setQuery] = useState("");
   const [selectedTag, setSelectedTag] = useState("");
   const [activeModalVideo, setActiveModalVideo] = useState<Video | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [form, setForm] = useState({ title: "", subtitle: "", url: "", tags: "", category: "" });
+  const [form, setForm] = useState({
+    title: "",
+    subtitle: "",
+    topic: "",
+    subtopic: "",
+    url: "",
+    tags: ""
+  });
   const [error, setError] = useState("");
 
   async function loadVideos() {
@@ -67,6 +78,40 @@ export default function Dashboard({
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, []);
 
+  // Grouping statistics for Topics
+  const topicStats = useMemo(() => {
+    const map = new Map<string, { subtopics: Set<string>; videoCount: number; previewThumbs: string[] }>();
+    videos.forEach((v) => {
+      const t = v.topic || "General";
+      const s = v.subtopic || "General Lessons";
+      if (!map.has(t)) {
+        map.set(t, { subtopics: new Set(), videoCount: 0, previewThumbs: [] });
+      }
+      const entry = map.get(t)!;
+      entry.subtopics.add(s);
+      entry.videoCount += 1;
+      if (entry.previewThumbs.length < 3) {
+        entry.previewThumbs.push(v.youtube_id);
+      }
+    });
+
+    return Array.from(map.entries()).map(([topic, data]) => ({
+      topic,
+      subtopicCount: data.subtopics.size,
+      videoCount: data.videoCount,
+      previewThumbs: data.previewThumbs
+    })).sort((a, b) => a.topic.localeCompare(b.topic));
+  }, [videos]);
+
+  // Distinct topics & subtopics for autocomplete datalists
+  const existingTopics = useMemo(() => {
+    return Array.from(new Set(videos.map((v) => v.topic || "General"))).sort();
+  }, [videos]);
+
+  const existingSubtopics = useMemo(() => {
+    return Array.from(new Set(videos.map((v) => v.subtopic || "General Lessons"))).sort();
+  }, [videos]);
+
   const allTags = useMemo(() => {
     const set = new Set<string>();
     videos.forEach((v) => {
@@ -75,17 +120,35 @@ export default function Dashboard({
     return Array.from(set).sort();
   }, [videos]);
 
-  const filteredVideos = useMemo(() => {
+  // Filtered videos for the current view
+  const currentTopicVideos = useMemo(() => {
     return videos.filter((v) => {
+      if (selectedTopic && v.topic !== selectedTopic) return false;
+      if (selectedSubtopic && v.subtopic !== selectedSubtopic) return false;
+
       const q = query.toLowerCase().trim();
       const titleMatch = v.title.toLowerCase().includes(q);
       const subtitleMatch = (v.subtitle || "").toLowerCase().includes(q);
       const tagMatch = (v.tags || []).some((t) => t.toLowerCase().includes(q));
-      const matchesSearch = !q || titleMatch || subtitleMatch || tagMatch;
+      const topicMatch = (v.topic || "").toLowerCase().includes(q);
+      const subtopicMatch = (v.subtopic || "").toLowerCase().includes(q);
+
+      const matchesSearch = !q || titleMatch || subtitleMatch || tagMatch || topicMatch || subtopicMatch;
       const matchesTag = !selectedTag || (v.tags || []).includes(selectedTag);
       return matchesSearch && matchesTag;
     });
-  }, [videos, query, selectedTag]);
+  }, [videos, selectedTopic, selectedSubtopic, query, selectedTag]);
+
+  // Group currentTopicVideos by subtopic
+  const subtopicGroups = useMemo(() => {
+    const map = new Map<string, Video[]>();
+    currentTopicVideos.forEach((v) => {
+      const s = v.subtopic || "General Lessons";
+      if (!map.has(s)) map.set(s, []);
+      map.get(s)!.push(v);
+    });
+    return Array.from(map.entries()).sort(([a], [b]) => a.localeCompare(b));
+  }, [currentTopicVideos]);
 
   async function handleAddVideo(e: React.FormEvent) {
     e.preventDefault();
@@ -103,9 +166,15 @@ export default function Dashboard({
       if (!res.ok) {
         setError(data.error || "Failed to add video.");
       } else {
-        // Instantly prepend new video to list
         setVideos((prev) => [data, ...prev]);
-        setForm({ title: "", subtitle: "", url: "", tags: "", category: "" });
+        setForm({
+          title: "",
+          subtitle: "",
+          topic: selectedTopic || "",
+          subtopic: "",
+          url: "",
+          tags: ""
+        });
       }
     } catch {
       setError("Failed to add video. Please try again.");
@@ -118,7 +187,6 @@ export default function Dashboard({
     if (currentMode !== "uploader") return;
     if (!confirm("Are you sure you want to delete this video?")) return;
 
-    // Optimistically remove from UI immediately
     setVideos((prev) => prev.filter((v) => v.id !== id));
     if (activeModalVideo?.id === id) {
       setActiveModalVideo(null);
@@ -138,7 +206,6 @@ export default function Dashboard({
 
   async function toggleWatched(video: Video) {
     const nextWatched = !video.watched;
-    // Optimistic instant toggle
     setVideos((prev) =>
       prev.map((v) => (v.id === video.id ? { ...v, watched: nextWatched } : v))
     );
@@ -159,7 +226,9 @@ export default function Dashboard({
       {/* Header */}
       <header className="header">
         <div>
-          <div className="brand">Study Video Tracker</div>
+          <div className="brand" style={{ cursor: "pointer" }} onClick={() => { setSelectedTopic(null); setSelectedSubtopic(""); }}>
+            Study Video Tracker
+          </div>
           <div className="user-badge">
             <span>{name || email || "User"}</span>
             <span>·</span>
@@ -169,7 +238,7 @@ export default function Dashboard({
 
         <div className="header-actions">
           {/* Mode Switcher for abhi.ukande22@gmail.com */}
-          {isUploaderEligible ? (
+          {isUploaderEligible && (
             <div style={{ display: "inline-flex", background: "var(--tag-bg)", borderRadius: "8px", padding: "2px" }}>
               <button
                 type="button"
@@ -202,7 +271,7 @@ export default function Dashboard({
                 📤 Uploader Mode
               </button>
             </div>
-          ) : null}
+          )}
 
           <ThemeToggle />
           <button className="btn" onClick={() => signOut({ callbackUrl: "/" })}>
@@ -213,67 +282,159 @@ export default function Dashboard({
 
       {error && <div className="alert-error">{error}</div>}
 
-      {/* Uploader Form (Only when in Uploader mode) */}
+      {/* Uploader Form */}
       {currentMode === "uploader" && (
         <form className="form-card" onSubmit={handleAddVideo}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
             <h2 className="form-title" style={{ margin: 0 }}>Add New Video</h2>
             <span className="role-pill" style={{ background: "var(--primary)", color: "#fff" }}>Uploader Active</span>
           </div>
+
           <div className="form-grid">
-            <input
-              className="input"
-              placeholder="Video Title (e.g. Introduction to Derivatives)"
-              value={form.title}
-              onChange={(e) => setForm({ ...form, title: e.target.value })}
-              required
-            />
-            <input
-              className="input"
-              placeholder="Subtitle / Description (e.g. Calculus Part 1 • Basics & Rules)"
-              value={form.subtitle}
-              onChange={(e) => setForm({ ...form, subtitle: e.target.value })}
-            />
-            <input
-              className="input full-width"
-              placeholder="YouTube Video URL (e.g. https://www.youtube.com/watch?v=...)"
-              value={form.url}
-              onChange={(e) => setForm({ ...form, url: e.target.value })}
-              required
-            />
-            <input
-              className="input"
-              placeholder="Tags (comma separated, e.g. Math, Calculus)"
-              value={form.tags}
-              onChange={(e) => setForm({ ...form, tags: e.target.value })}
-            />
-            <input
-              className="input"
-              placeholder="Category (optional, e.g. Mathematics)"
-              value={form.category}
-              onChange={(e) => setForm({ ...form, category: e.target.value })}
-            />
+            <div>
+              <label style={{ fontSize: "0.8125rem", color: "var(--text-muted)", display: "block", marginBottom: "4px" }}>
+                Topic / Subject *
+              </label>
+              <input
+                className="input"
+                list="topics-list"
+                placeholder="e.g. Mathematics, Computer Science"
+                value={form.topic}
+                onChange={(e) => setForm({ ...form, topic: e.target.value })}
+                required
+              />
+              <datalist id="topics-list">
+                {existingTopics.map((t) => (
+                  <option key={t} value={t} />
+                ))}
+              </datalist>
+            </div>
+
+            <div>
+              <label style={{ fontSize: "0.8125rem", color: "var(--text-muted)", display: "block", marginBottom: "4px" }}>
+                Subtopic / Chapter *
+              </label>
+              <input
+                className="input"
+                list="subtopics-list"
+                placeholder="e.g. Calculus, Linear Algebra"
+                value={form.subtopic}
+                onChange={(e) => setForm({ ...form, subtopic: e.target.value })}
+                required
+              />
+              <datalist id="subtopics-list">
+                {existingSubtopics.map((s) => (
+                  <option key={s} value={s} />
+                ))}
+              </datalist>
+            </div>
+
+            <div>
+              <label style={{ fontSize: "0.8125rem", color: "var(--text-muted)", display: "block", marginBottom: "4px" }}>
+                Video Title *
+              </label>
+              <input
+                className="input"
+                placeholder="e.g. Derivatives & Limits"
+                value={form.title}
+                onChange={(e) => setForm({ ...form, title: e.target.value })}
+                required
+              />
+            </div>
+
+            <div>
+              <label style={{ fontSize: "0.8125rem", color: "var(--text-muted)", display: "block", marginBottom: "4px" }}>
+                Subtitle / Description (optional)
+              </label>
+              <input
+                className="input"
+                placeholder="e.g. Part 1 • Fundamental theorem"
+                value={form.subtitle}
+                onChange={(e) => setForm({ ...form, subtitle: e.target.value })}
+              />
+            </div>
+
+            <div className="full-width">
+              <label style={{ fontSize: "0.8125rem", color: "var(--text-muted)", display: "block", marginBottom: "4px" }}>
+                YouTube URL *
+              </label>
+              <input
+                className="input"
+                placeholder="e.g. https://www.youtube.com/watch?v=..."
+                value={form.url}
+                onChange={(e) => setForm({ ...form, url: e.target.value })}
+                required
+              />
+            </div>
+
+            <div className="full-width">
+              <label style={{ fontSize: "0.8125rem", color: "var(--text-muted)", display: "block", marginBottom: "4px" }}>
+                Tags (optional, comma-separated)
+              </label>
+              <input
+                className="input"
+                placeholder="e.g. Math, Calculus, Basics"
+                value={form.tags}
+                onChange={(e) => setForm({ ...form, tags: e.target.value })}
+              />
+            </div>
+
             <div className="full-width">
               <button
                 type="submit"
                 className="btn primary"
                 disabled={isSubmitting}
+                style={{ width: "100%", padding: "12px", fontSize: "1rem" }}
               >
-                {isSubmitting ? "Adding..." : "Add Video"}
+                {isSubmitting ? "Adding..." : "Add Study Video"}
               </button>
             </div>
           </div>
         </form>
       )}
 
+      {/* Breadcrumb Navigation when viewing a specific Topic */}
+      {selectedTopic && (
+        <nav className="breadcrumb-nav">
+          <button
+            className="breadcrumb-back"
+            onClick={() => {
+              setSelectedTopic(null);
+              setSelectedSubtopic("");
+            }}
+          >
+            ← Back to All Topics
+          </button>
+          <span style={{ color: "var(--text-muted)" }}>/</span>
+          <span className="breadcrumb-current">Topic: {selectedTopic}</span>
+        </nav>
+      )}
+
       {/* Toolbar / Search */}
       <div className="toolbar">
         <input
           className="input search-input"
-          placeholder="Search by title, subtitle, or tag..."
+          placeholder="Search title, subtitle, topic, or tag..."
           value={query}
           onChange={(e) => setQuery(e.target.value)}
         />
+        {selectedTopic && (
+          <select
+            className="input"
+            style={{ width: "auto" }}
+            value={selectedSubtopic}
+            onChange={(e) => setSelectedSubtopic(e.target.value)}
+          >
+            <option value="">All Subtopics</option>
+            {Array.from(
+              new Set(videos.filter((v) => v.topic === selectedTopic).map((v) => v.subtopic || "General"))
+            ).map((sub) => (
+              <option key={sub} value={sub}>
+                {sub}
+              </option>
+            ))}
+          </select>
+        )}
         <select
           className="input"
           style={{ width: "auto" }}
@@ -287,125 +448,182 @@ export default function Dashboard({
             </option>
           ))}
         </select>
-        {(query || selectedTag) && (
+        {(query || selectedTag || selectedSubtopic) && (
           <button
             className="btn"
             onClick={() => {
               setQuery("");
               setSelectedTag("");
+              setSelectedSubtopic("");
             }}
           >
-            Clear
+            Clear Filters
           </button>
         )}
       </div>
 
-      {/* Video Grid */}
-      <section className="video-grid">
-        {filteredVideos.length === 0 ? (
-          <div className="empty-state">
-            <p style={{ margin: 0 }}>No videos found.</p>
-            {currentMode === "uploader" && (
-              <p style={{ fontSize: "0.875rem", marginTop: "6px" }}>Use the form above to add your first study video!</p>
-            )}
+      {/* VIEW 1: TOPIC OVERVIEW (When no specific topic is selected) */}
+      {!selectedTopic && (
+        <div>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "18px" }}>
+            <h2 style={{ fontSize: "1.35rem", margin: 0 }}>📚 Study Topics</h2>
+            <span style={{ fontSize: "0.875rem", color: "var(--text-muted)" }}>
+              {topicStats.length} {topicStats.length === 1 ? "topic" : "topics"} available
+            </span>
           </div>
-        ) : (
-          filteredVideos.map((video) => (
-            <article className="card" key={video.id}>
-              {/* Thumbnail - Click to pop screen video */}
-              <div
-                className="thumb-wrapper"
-                onClick={() => setActiveModalVideo(video)}
-                title="Click to play video"
-              >
-                <img
-                  className="thumb"
-                  src={`https://img.youtube.com/vi/${video.youtube_id}/mqdefault.jpg`}
-                  alt={video.title}
-                  loading="lazy"
-                  decoding="async"
-                  width="320"
-                  height="180"
-                />
-                <div className="play-overlay">
-                  <div className="play-icon">▶</div>
-                </div>
-                {video.watched && (
-                  <span className="watched-badge">Watched ✓</span>
-                )}
-              </div>
 
-              <div className="card-body">
-                {/* Title - Click to pop screen video */}
-                <div
-                  className="card-title clickable-title"
-                  onClick={() => setActiveModalVideo(video)}
-                  title="Click to play video"
-                  style={{ cursor: "pointer" }}
+          {topicStats.length === 0 ? (
+            <div className="empty-state">
+              <p style={{ margin: 0, fontSize: "1.125rem", fontWeight: 600 }}>No study topics yet.</p>
+              {currentMode === "uploader" ? (
+                <p style={{ fontSize: "0.875rem", marginTop: "6px" }}>Use the form above to add your first topic, subtopic, and video!</p>
+              ) : (
+                <p style={{ fontSize: "0.875rem", marginTop: "6px" }}>Please ask an uploader to add study videos.</p>
+              )}
+            </div>
+          ) : (
+            <section className="topic-grid">
+              {topicStats.map((item) => (
+                <article
+                  key={item.topic}
+                  className="topic-card"
+                  onClick={() => {
+                    setSelectedTopic(item.topic);
+                    setSelectedSubtopic("");
+                  }}
                 >
-                  {video.title}
+                  <div>
+                    <div className="topic-icon">📁</div>
+                    <div className="topic-title">{item.topic}</div>
+                    <div style={{ fontSize: "0.875rem", color: "var(--text-muted)" }}>
+                      Includes {item.subtopicCount} {item.subtopicCount === 1 ? "subtopic" : "subtopics"}
+                    </div>
+                  </div>
+
+                  <div>
+                    <div className="topic-meta">
+                      <span>🎬 {item.videoCount} {item.videoCount === 1 ? "Video" : "Videos"}</span>
+                      <span>•</span>
+                      <span style={{ color: "var(--primary)", fontWeight: 600 }}>Explore →</span>
+                    </div>
+                  </div>
+                </article>
+              ))}
+            </section>
+          )}
+        </div>
+      )}
+
+      {/* VIEW 2: TOPIC DETAIL PAGE (Organized by Subtopics) */}
+      {selectedTopic && (
+        <div>
+          {subtopicGroups.length === 0 ? (
+            <div className="empty-state">
+              <p style={{ margin: 0 }}>No videos found in this topic matching your filters.</p>
+            </div>
+          ) : (
+            subtopicGroups.map(([subtopicName, subVideos]) => (
+              <section className="subtopic-section" key={subtopicName}>
+                <div className="subtopic-header">
+                  <h3 className="subtopic-title">📌 {subtopicName}</h3>
+                  <span className="subtopic-badge">{subVideos.length} {subVideos.length === 1 ? "video" : "videos"}</span>
                 </div>
 
-                {/* Subtitle - Click to pop screen video */}
-                {video.subtitle && (
-                  <div
-                    className="card-subtitle clickable-subtitle"
-                    onClick={() => setActiveModalVideo(video)}
-                    title="Click to play video"
-                    style={{
-                      cursor: "pointer",
-                      fontSize: "0.875rem",
-                      color: "var(--text-muted)",
-                      marginBottom: "8px",
-                      lineHeight: "1.4"
-                    }}
-                  >
-                    {video.subtitle}
-                  </div>
-                )}
+                <div className="video-grid">
+                  {subVideos.map((video) => (
+                    <article className="card" key={video.id}>
+                      {/* Thumbnail - Click to pop screen video */}
+                      <div
+                        className="thumb-wrapper"
+                        onClick={() => setActiveModalVideo(video)}
+                        title="Click to play video"
+                      >
+                        <img
+                          className="thumb"
+                          src={`https://img.youtube.com/vi/${video.youtube_id}/mqdefault.jpg`}
+                          alt={video.title}
+                          loading="lazy"
+                          decoding="async"
+                          width="320"
+                          height="180"
+                        />
+                        <div className="play-overlay">
+                          <div className="play-icon">▶</div>
+                        </div>
+                        {video.watched && (
+                          <span className="watched-badge">Watched ✓</span>
+                        )}
+                      </div>
 
-                {video.category && (
-                  <div className="category-text">{video.category}</div>
-                )}
+                      <div className="card-body">
+                        {/* Title - Click to pop screen video */}
+                        <div
+                          className="card-title clickable-title"
+                          onClick={() => setActiveModalVideo(video)}
+                          title="Click to play video"
+                        >
+                          {video.title}
+                        </div>
 
-                {video.tags && video.tags.length > 0 && (
-                  <div className="tags">
-                    {video.tags.map((t) => (
-                      <span className="tag" key={t}>
-                        #{t}
-                      </span>
-                    ))}
-                  </div>
-                )}
+                        {/* Subtitle - Click to pop screen video */}
+                        {video.subtitle && (
+                          <div
+                            className="card-subtitle clickable-subtitle"
+                            onClick={() => setActiveModalVideo(video)}
+                            title="Click to play video"
+                            style={{
+                              fontSize: "0.875rem",
+                              color: "var(--text-muted)",
+                              marginBottom: "8px",
+                              lineHeight: "1.4"
+                            }}
+                          >
+                            {video.subtitle}
+                          </div>
+                        )}
 
-                <div className="card-actions">
-                  <button
-                    className="btn primary"
-                    onClick={() => setActiveModalVideo(video)}
-                  >
-                    ▶ Watch Video
-                  </button>
-                  <button
-                    className="btn"
-                    onClick={() => toggleWatched(video)}
-                  >
-                    {video.watched ? "Watched ✓" : "Mark watched"}
-                  </button>
-                  {/* Delete button only visible in Uploader mode */}
-                  {currentMode === "uploader" && (
-                    <button
-                      className="btn danger"
-                      onClick={() => handleDelete(video.id)}
-                    >
-                      Delete
-                    </button>
-                  )}
+                        {video.tags && video.tags.length > 0 && (
+                          <div className="tags">
+                            {video.tags.map((t) => (
+                              <span className="tag" key={t}>
+                                #{t}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+
+                        <div className="card-actions">
+                          <button
+                            className="btn primary"
+                            onClick={() => setActiveModalVideo(video)}
+                          >
+                            ▶ Watch Video
+                          </button>
+                          <button
+                            className="btn"
+                            onClick={() => toggleWatched(video)}
+                          >
+                            {video.watched ? "Watched ✓" : "Mark watched"}
+                          </button>
+                          {/* Delete button only visible in Uploader mode */}
+                          {currentMode === "uploader" && (
+                            <button
+                              className="btn danger"
+                              onClick={() => handleDelete(video.id)}
+                            >
+                              Delete
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    </article>
+                  ))}
                 </div>
-              </div>
-            </article>
-          ))
-        )}
-      </section>
+              </section>
+            ))
+          )}
+        </div>
+      )}
 
       {/* Video Pop Screen Modal */}
       {activeModalVideo && (
@@ -417,11 +635,12 @@ export default function Dashboard({
             <div className="modal-header">
               <div>
                 <div className="modal-title">{activeModalVideo.title}</div>
-                {activeModalVideo.subtitle && (
-                  <div style={{ fontSize: "0.875rem", color: "var(--text-muted)", marginTop: "3px" }}>
-                    {activeModalVideo.subtitle}
-                  </div>
-                )}
+                <div style={{ fontSize: "0.8125rem", color: "var(--text-muted)", marginTop: "3px" }}>
+                  <span>{activeModalVideo.topic}</span>
+                  <span> › </span>
+                  <span>{activeModalVideo.subtopic}</span>
+                  {activeModalVideo.subtitle && <span> • {activeModalVideo.subtitle}</span>}
+                </div>
               </div>
               <button
                 className="btn"

@@ -31,7 +31,11 @@ export async function GET() {
     ]);
 
     if (videosRes.status === "fulfilled" && !videosRes.value.error && videosRes.value.data) {
-      dbVideos = videosRes.value.data;
+      dbVideos = videosRes.value.data.map((v: any) => ({
+        ...v,
+        topic: v.topic || v.category || "General",
+        subtopic: v.subtopic || "General Lessons"
+      }));
     }
 
     if (watchedRes.status === "fulfilled" && !watchedRes.value.error && watchedRes.value.data) {
@@ -77,7 +81,9 @@ export async function POST(req: Request) {
   const rawUrl = String(body.url || "").trim();
   const title = String(body.title || "").trim();
   const subtitle = String(body.subtitle || "").trim() || null;
-  const category = String(body.category || "").trim() || null;
+  const topic = String(body.topic || "").trim() || "General";
+  const subtopic = String(body.subtopic || "").trim() || "General Lessons";
+  const category = String(body.category || "").trim() || topic;
 
   const yId = youtubeId(rawUrl);
   if (!yId || !title) {
@@ -101,6 +107,8 @@ export async function POST(req: Request) {
   const savedRecord = persistentStore.addVideo({
     title,
     subtitle,
+    topic,
+    subtopic,
     youtube_id: yId,
     tags,
     category,
@@ -115,7 +123,7 @@ export async function POST(req: Request) {
         subtitle,
         youtube_id: yId,
         tags,
-        category,
+        category: topic,
         added_by: userId
       });
     } catch {}
