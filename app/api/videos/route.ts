@@ -22,7 +22,7 @@ export async function GET() {
     const [videosRes, watchedRes] = await Promise.allSettled([
       supabase
         .from("videos")
-        .select("id, title, subtitle, youtube_id, tags, category, added_by")
+        .select("id, title, subtitle, topic, subtopic, youtube_id, tags, category, added_by")
         .order("id", { ascending: false }),
       supabase
         .from("watched")
@@ -103,31 +103,42 @@ export async function POST(req: Request) {
     tags = body.tags.map((t: any) => String(t).trim()).filter(Boolean);
   }
 
-  // Save to persistent storage immediately
-  const savedRecord = persistentStore.addVideo({
-    title,
-    subtitle,
-    topic,
-    subtopic,
-    youtube_id: yId,
-    tags,
-    category,
-    added_by: userId
-  });
-
-  // Sync to Supabase in the background non-blocking
-  (async () => {
-    try {
-      await supabase.from("videos").insert({
+  // 1. Try saving to Supabase first
+  let savedRecord: VideoRecord | null = null;
+  try {
+    const { data, error } = await supabase
+      .from("videos")
+      .insert({
         title,
         subtitle,
+        topic,
+        subtopic,
         youtube_id: yId,
         tags,
         category: topic,
         added_by: userId
-      });
-    } catch {}
-  })();
+      })
+      .select()
+      .single();
+
+    if (!error && data) {
+      savedRecord = data;
+    }
+  } catch {}
+
+  // 2. Fallback to local store if Supabase insert fails
+  if (!savedRecord) {
+    savedRecord = persistentStore.addVideo({
+      title,
+      subtitle,
+      topic,
+      subtopic,
+      youtube_id: yId,
+      tags,
+      category: topic,
+      added_by: userId
+    });
+  }
 
   return NextResponse.json(savedRecord, { status: 201 });
 }
